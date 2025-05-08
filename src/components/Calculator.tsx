@@ -1,4 +1,10 @@
 import { useState, useEffect } from 'react';
+import { useTimer } from '../hooks/useTimer';
+import { useNumberGeneration } from '../hooks/useNumberGeneration';
+import { CalculatorDisplay } from './CalculatorDisplay';
+import { NumberGrid } from './NumberGrid';
+import { AvailableResults } from './AvailableResults';
+import { Operators } from './Operators';
 
 interface Calculation {
   expression: string;
@@ -42,108 +48,10 @@ interface GridNumber {
 }
 
 const Calculator = () => {
-  const generateRandomNumbers = () => {
-    // Helper function to get random items from array
-    const getRandomItems = (arr: number[], count: number) => {
-      const shuffled = [...arr].sort(() => 0.5 - Math.random());
-      return shuffled.slice(0, count);
-    };
-
-    // Generate 8 unique random numbers from 1-19
-    const smallNumbers = getRandomItems(
-      Array.from({ length: 19 }, (_, i) => i + 1),
-      8
-    ).sort((a, b) => a - b);
-
-    // Get 2 random numbers from medium pool
-    const mediumPool = [20, 25, 50, 75];
-    const mediumNumbers = getRandomItems(mediumPool, 2).sort((a, b) => a - b);
-
-    // Get 2 random numbers from large pool
-    const largePool = [250, 500, 750, 1000, 2000];
-    const largeNumbers = getRandomItems(largePool, 2).sort((a, b) => a - b);
-
-    // Create grid numbers with fixed positions
-    const gridNumbers: GridNumber[] = [
-      ...smallNumbers.map((value, index) => ({
-        value,
-        used: false,
-        type: 'small' as const,
-        position: index
-      })),
-      ...mediumNumbers.map((value, index) => ({
-        value,
-        used: false,
-        type: 'medium' as const,
-        position: 8 + index
-      })),
-      ...largeNumbers.map((value, index) => ({
-        value,
-        used: false,
-        type: 'large' as const,
-        position: 10 + index
-      }))
-    ];
-
-    return gridNumbers;
-  };
-
-  const generateTarget = (numbers: { small: number[], medium: number[], large: number[] }, isThirdRound: boolean = false) => {
-    if (isThirdRound) {
-      const allNumbers = [...numbers.small, ...numbers.medium, ...numbers.large];
-      if (allNumbers.length === 0) return { target: 0, solution: "0" };
-      if (allNumbers.length === 1) return { target: allNumbers[0], solution: allNumbers[0].toString() };
-
-      // Sort numbers to handle them in a strategic order
-      allNumbers.sort((a, b) => a - b);
-
-      // Initialize target with the first number
-      let target = allNumbers[0];
-      let solution = target.toString();
-      
-      // Use all remaining numbers to build the target
-      for (let i = 1; i < allNumbers.length; i++) {
-        const number = allNumbers[i];
-        
-        if (target <= 100 && number <= 100) {
-          target = target * number;
-          solution = `(${solution} * ${number})`;
-        } else {
-          target = target + number;
-          solution = `(${solution} + ${number})`;
-        }
-      }
-      
-      return { target, solution };
-    }
-
-    // Original target generation for rounds 1 and 2
-    const allNumbers = [...numbers.small, ...numbers.medium, ...numbers.large];
-    const numCount = Math.floor(Math.random() * 3) + 2;
-    const selectedNumbers = [];
-    let target = 0;
-    
-    for (let i = 0; i < numCount; i++) {
-      if (allNumbers.length === 0) break;
-      
-      const randomIndex = Math.floor(Math.random() * allNumbers.length);
-      const number = allNumbers[randomIndex];
-      selectedNumbers.push(number);
-      allNumbers.splice(randomIndex, 1);
-      
-      if (i === 0) {
-        target = number;
-      } else {
-        const operation = Math.random() < 0.7 ? '+' : '*';
-        target = operation === '+' ? target + number : target * number;
-      }
-    }
-    
-    return { target };
-  };
+  const { initialGridNumbers, generateTarget } = useNumberGeneration();
+  const { timer, isTimerRunning, hasStartedRound, startTimer, stopTimer, resetTimer, formatTime } = useTimer();
 
   const [display, setDisplay] = useState('0');
-  const [initialGridNumbers] = useState(generateRandomNumbers);
   const [gridNumbers, setGridNumbers] = useState(initialGridNumbers);
   const [originalTarget] = useState(() => generateTarget({ 
     small: initialGridNumbers.filter(n => n.type === 'small').map(n => n.value),
@@ -159,54 +67,24 @@ const Calculator = () => {
   const [roundNumber, setRoundNumber] = useState(1);
   const [roundResults, setRoundResults] = useState<RoundResult[]>([]);
   const [gameComplete, setGameComplete] = useState(false);
-
-  // Add timer state
-  const [timer, setTimer] = useState(0);
-  const [isTimerRunning, setIsTimerRunning] = useState(false);
-  const [hasStartedRound, setHasStartedRound] = useState(false);
-
-  // Format time function
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  // Timer effect
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isTimerRunning) {
-      interval = setInterval(() => {
-        setTimer((prev) => prev + 1);
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [isTimerRunning]);
-
-  // Remove timer start from useEffect
-  useEffect(() => {
-    if (!isSuccess) {
-      setTimer(0);
-      setHasStartedRound(false);
-    }
-  }, [roundNumber, isSuccess]);
+  const [roundStartResults, setRoundStartResults] = useState<AvailableResult[]>([]);
+  const [showingSolution, setShowingSolution] = useState(false);
+  const [nextRoundState, setNextRoundState] = useState<{
+    numbers: { small: number[], medium: number[], large: number[] };
+    target: number;
+    solution?: string;
+  } | null>(null);
 
   const handleNumberClick = (num: number) => {
-    // Check if this specific grid number is already used in current calculation
     if (currentCalculationNumbers.some(n => n === num && !availableResults.some(r => r.value === n))) {
       return;
     }
 
-    // Start timer on first number click of the round
-    if (!hasStartedRound) {
-      setIsTimerRunning(true);
-      setHasStartedRound(true);
-    }
+    startTimer();
     
     setDisplay(prev => prev === '0' ? num.toString() : prev + num);
     setCurrentCalculationNumbers(prev => [...prev, num]);
     
-    // Mark the number as used immediately
     setGridNumbers(prev => 
       prev.map(n => 
         n.value === num 
@@ -217,18 +95,12 @@ const Calculator = () => {
   };
 
   const handleResultClick = (result: AvailableResult) => {
-    // Check if this specific result is already used in current calculation
     if (currentCalculationNumbers.some(n => n === result.value && availableResults.some(r => r.value === n))) {
       return;
     }
 
     if (!result.used) {
-      // Start timer on first number click of the round
-      if (!hasStartedRound) {
-        setIsTimerRunning(true);
-        setHasStartedRound(true);
-      }
-
+      startTimer();
       setDisplay(prev => prev === '0' ? result.value.toString() : prev + result.value);
       setCurrentCalculationNumbers(prev => [...prev, result.value]);
     }
@@ -241,9 +113,6 @@ const Calculator = () => {
       setDisplay(prev => prev + ' ' + operator + ' ');
     }
   };
-
-  // Add state to track available results at start of round
-  const [roundStartResults, setRoundStartResults] = useState<AvailableResult[]>([]);
 
   const handleReset = (fromProgress: boolean = false, roundToReset?: number) => {
     if (fromProgress && roundToReset) {
@@ -283,9 +152,7 @@ const Calculator = () => {
       setCalculations([]);
       setIsSuccess(false);
       setNextRoundState(null);
-      setTimer(0);
-      setIsTimerRunning(false);
-      setHasStartedRound(false);
+      resetTimer();
     } else {
       // Regular reset (current round only)
       setDisplay('0');
@@ -308,9 +175,7 @@ const Calculator = () => {
 
       setCurrentCalculationNumbers([]);
       setCalculations([]);
-      setTimer(0);
-      setIsTimerRunning(false);
-      setHasStartedRound(false);
+      resetTimer();
     }
   };
 
@@ -429,7 +294,7 @@ const Calculator = () => {
       
       if (result === target) {
         setIsSuccess(true);
-        setIsTimerRunning(false);
+        stopTimer();
         
         // Update available results with the target
         const updatedResults = [...availableResults];
@@ -497,13 +362,6 @@ const Calculator = () => {
     }
   };
 
-  // Add state for next round
-  const [nextRoundState, setNextRoundState] = useState<{
-    numbers: { small: number[], medium: number[], large: number[] };
-    target: number;
-    solution?: string;
-  } | null>(null);
-
   const handleNextRound = () => {
     if (nextRoundState) {
       const nextRoundNumber = roundNumber + 1;
@@ -536,16 +394,14 @@ const Calculator = () => {
       setDisplay('0');
       setCurrentCalculationNumbers([]);
       setIsSuccess(false);
-      setTimer(0);
-      setIsTimerRunning(false);
-      setHasStartedRound(false);
+      resetTimer();
     }
   };
 
   // Add give up handler
   const handleGiveUp = () => {
     setShowingSolution(true);
-    setIsTimerRunning(false);
+    stopTimer();
   };
 
   const buttonBaseClass = "w-full rounded-lg text-white font-semibold transition-all duration-200 active:scale-95";
@@ -558,7 +414,7 @@ const Calculator = () => {
   const formattedDisplay = display;
 
   const startNewChampionship = () => {
-    const newInitialNumbers = generateRandomNumbers();
+    const newInitialNumbers = initialGridNumbers;
     setGridNumbers(newInitialNumbers);
     const newTarget = generateTarget({ 
       small: newInitialNumbers.filter(n => n.type === 'small').map(n => n.value),
@@ -577,12 +433,8 @@ const Calculator = () => {
     setRoundNumber(1);
     setRoundResults([]);
     setGameComplete(false);
-    setTimer(0);
-    setIsTimerRunning(false);
-    setHasStartedRound(false);
+    resetTimer();
   };
-
-  const [showingSolution, setShowingSolution] = useState(false);
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-gray-900 p-4">
@@ -714,116 +566,34 @@ const Calculator = () => {
         {/* Calculator Panel */}
         <div className="flex-1">
           <div className="w-full bg-gray-800 rounded-2xl shadow-2xl p-6 space-y-4">
-            <div className="space-y-2">
-              <div className="text-white text-xl font-bold text-center flex justify-between items-center">
-                <span>TARGET: {target}</span>
-                <span>Time: {formatTime(timer)}</span>
-              </div>
-              <div className="bg-gray-200 p-6 rounded-lg min-h-[120px]">
-                <div 
-                  className="text-3xl md:text-4xl font-bold text-gray-900 text-right overflow-x-auto whitespace-nowrap scrollbar-hide"
-                  style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-                  data-testid="calculator-display"
-                >
-                  {formattedDisplay}
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => handleReset(false)}
-                  className={`${buttonBaseClass} flex-1 bg-red-500 hover:bg-red-600`}
-                >
-                  Reset Current Round
-                </button>
-                {roundNumber === 3 && !isSuccess && (
-                  <button
-                    onClick={handleGiveUp}
-                    className={`${buttonBaseClass} flex-1 bg-yellow-500 hover:bg-yellow-600`}
-                  >
-                    Give Up
-                  </button>
-                )}
-              </div>
-            </div>
+            <CalculatorDisplay
+              display={display}
+              target={target}
+              timer={timer}
+              formatTime={formatTime}
+              onReset={() => handleReset(false)}
+              onGiveUp={handleGiveUp}
+              showGiveUp={roundNumber === 3 && !isSuccess}
+            />
 
-            {/* Available Results */}
-            <div className="space-y-1">
-              <div className="text-white text-sm font-semibold mb-1">Available Results:</div>
-              <div className="grid grid-cols-4 gap-1.5 min-h-[60px]">
-                {availableResults.length > 0 ? (
-                  availableResults.map((result, index) => {
-                    let buttonStyle = resultButtonClass;
-                    if (result.isTarget && result.roundAchieved < roundNumber) {
-                      buttonStyle = `${buttonBaseClass} h-8 text-sm bg-green-800 hover:bg-green-900 disabled:opacity-50 disabled:cursor-not-allowed`;
-                    } else if (result.isTarget) {
-                      buttonStyle = `${buttonBaseClass} h-8 text-sm bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed`;
-                    } else {
-                      buttonStyle = `${buttonBaseClass} h-8 text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed`;
-                    }
+            <AvailableResults
+              results={availableResults}
+              currentCalculationNumbers={currentCalculationNumbers}
+              roundNumber={roundNumber}
+              onResultClick={handleResultClick}
+            />
 
-                    // Disable only if this specific result is used or used in current calculation as a result
-                    const isDisabled = result.used || 
-                      currentCalculationNumbers.some(n => n === result.value && availableResults.some(r => r.value === n));
+            <NumberGrid
+              gridNumbers={gridNumbers}
+              currentCalculationNumbers={currentCalculationNumbers}
+              availableResults={availableResults}
+              onNumberClick={handleNumberClick}
+            />
 
-                    return (
-                      <button
-                        key={index}
-                        onClick={() => handleResultClick(result)}
-                        disabled={isDisabled}
-                        className={`${buttonStyle} ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      >
-                        {result.value}
-                      </button>
-                    );
-                  })
-                ) : (
-                  <div className="col-span-4 flex items-center justify-center text-gray-400 text-sm">
-                    No results available
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-4 gap-2">
-              {[...Array(12)].map((_, index) => {
-                const gridNumber = gridNumbers.find(n => n.position === index);
-                if (!gridNumber) return null;
-
-                let buttonClass = numberButtonClass;
-                if (gridNumber.type === 'medium') {
-                  buttonClass = `${numberButtonClass} bg-blue-600 hover:bg-blue-700`;
-                } else if (gridNumber.type === 'large') {
-                  buttonClass = `${numberButtonClass} bg-purple-600 hover:bg-purple-700`;
-                }
-
-                // Number is disabled if used in any round or used in current calculation as a grid number
-                const isDisabled = gridNumber.used || 
-                  currentCalculationNumbers.some(n => n === gridNumber.value && !availableResults.some(r => r.value === n));
-
-                return (
-                  <button
-                    key={index}
-                    onClick={() => handleNumberClick(gridNumber.value)}
-                    disabled={isDisabled}
-                    className={`${buttonClass} ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    title={gridNumber.usedInRound ? `Used in Round ${gridNumber.usedInRound}` : undefined}
-                  >
-                    {gridNumber.value}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="grid grid-cols-3 gap-3">
-              <button onClick={() => handleOperatorClick('(')} className={operatorButtonClass}>(</button>
-              <button onClick={() => handleOperatorClick(')')} className={operatorButtonClass}>)</button>
-              <button onClick={handleDelete} className={deleteButtonClass}>DEL</button>
-              <button onClick={() => handleOperatorClick('+')} className={operatorButtonClass}>+</button>
-              <button onClick={() => handleOperatorClick('-')} className={operatorButtonClass}>-</button>
-              <button onClick={() => handleOperatorClick('=')} className={`${operatorButtonClass} font-bold`}>=</button>
-              <button onClick={() => handleOperatorClick('/')} className={operatorButtonClass}>/</button>
-              <button onClick={() => handleOperatorClick('*')} className={operatorButtonClass}>*</button>
-            </div>
+            <Operators
+              onOperatorClick={handleOperatorClick}
+              onDelete={handleDelete}
+            />
           </div>
         </div>
 
