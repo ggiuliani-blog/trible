@@ -150,7 +150,10 @@ const Calculator = () => {
           <div className="space-y-2">
             <div className="text-white text-xl font-bold text-center">TARGET: {target}</div>
             <div className="bg-gray-200 p-6 rounded-lg min-h-[120px]">
-              <div className="text-3xl md:text-4xl font-bold text-gray-900 text-right whitespace-pre-wrap break-words">
+              <div 
+                className="text-3xl md:text-4xl font-bold text-gray-900 text-right whitespace-pre-wrap break-words"
+                data-testid="calculator-display"
+              >
                 {formattedDisplay}
               </div>
             </div>
