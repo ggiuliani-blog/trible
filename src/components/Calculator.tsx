@@ -5,6 +5,7 @@ import { CalculatorDisplay } from './CalculatorDisplay';
 import { NumberGrid } from './NumberGrid';
 import { AvailableResults } from './AvailableResults';
 import { Operators } from './Operators';
+import { TribalWangCelebration } from './TribalWangCelebration';
 
 interface Calculation {
   expression: string;
@@ -69,13 +70,87 @@ const Calculator = () => {
   const [gameComplete, setGameComplete] = useState(false);
   const [roundStartResults, setRoundStartResults] = useState<AvailableResult[]>([]);
   const [showingSolution, setShowingSolution] = useState(false);
+  const [showingCelebration, setShowingCelebration] = useState(false);
   const [nextRoundState, setNextRoundState] = useState<{
     numbers: { small: number[], medium: number[], large: number[] };
     target: number;
     solution?: string;
   } | null>(null);
 
+  // Track wrong guesses for TribalWang
+  const [wrongGuesses, setWrongGuesses] = useState<number[]>([]);
+
+  // Reset wrong guesses when round changes
+  useEffect(() => {
+    setWrongGuesses([]);
+  }, [roundNumber]);
+
+  // Determine if TribalWang feature is enabled and this is a TribalWang round (every 2nd round)
+  const tribalWangEnabled = import.meta.env.VITE_TRIBALWANG === 'true';
+  const isTribalRound = tribalWangEnabled && roundNumber % 2 === 0;
+
+  // Handle TribalWang guess
+  const handleTribalWangGuess = (num: number) => {
+    startTimer();
+    if (num === target) {
+      setIsSuccess(true);
+      stopTimer();
+      const celebrationTimer = setTimeout(() => {
+        setShowingCelebration(false);
+      }, 10000);
+      setShowingCelebration(true);
+
+      setRoundResults(prev => [...prev, {
+        target: target,
+        solution: num.toString(),
+        numbersUsed: [num],
+        roundNumber: roundNumber,
+        timeInSeconds: timer
+      }]);
+      
+      // Mark the correct guess as used for future rounds
+      setGridNumbers(prev =>
+        prev.map(n =>
+          n.value === num
+            ? { ...n, used: true, usedInRound: roundNumber }
+            : n
+        )
+      );
+      
+      // Set up next round with remaining numbers
+      const remainingNumbers = {
+        small: gridNumbers.filter(n => n.type === 'small' && !n.used && n.value !== num).map(n => n.value),
+        medium: gridNumbers.filter(n => n.type === 'medium' && !n.used && n.value !== num).map(n => n.value),
+        large: gridNumbers.filter(n => n.type === 'large' && !n.used && n.value !== num).map(n => n.value)
+      };
+      
+      setNextRoundState({
+        numbers: remainingNumbers,
+        target: generateTarget(remainingNumbers).target
+      });
+    } else {
+      // Add to wrong guesses
+      setWrongGuesses(prev => [...prev, num]);
+      // Mark wrong guesses as used for future rounds
+      setGridNumbers(prev =>
+        prev.map(n =>
+          n.value === num
+            ? { ...n, used: true, usedInRound: roundNumber }
+            : n
+        )
+      );
+      // Show incorrect guess feedback
+      setDisplay('❌ Wrong guess!');
+      setTimeout(() => setDisplay('0'), 1000);
+    }
+  };
+
   const handleNumberClick = (num: number) => {
+    if (isTribalRound) {
+      handleTribalWangGuess(num);
+      return;
+    }
+
     if (currentCalculationNumbers.some(n => n === num && !availableResults.some(r => r.value === n))) {
       return;
     }
@@ -368,11 +443,12 @@ const Calculator = () => {
       setRoundNumber(nextRoundNumber);
       setShowingSolution(false);
       
-      // Keep all previously used numbers disabled
+      // Keep all previously used numbers disabled, including from TribalWang rounds
       setGridNumbers(prev =>
         prev.map(n => ({
           ...n,
-          used: n.usedInRound !== undefined
+          used: n.usedInRound !== undefined,
+          usedInRound: n.usedInRound // Preserve the round where it was used
         }))
       );
 
@@ -383,12 +459,28 @@ const Calculator = () => {
       setRoundStartResults(startResults);
       setAvailableResults(startResults);
 
-      // For round 3, generate target using only remaining unused numbers
-      const isThirdRound = nextRoundNumber === 3;
-      const { target, solution } = generateTarget(nextRoundState.numbers, isThirdRound);
-      setTarget(target);
-      if (solution) {
-        setNextRoundState({ ...nextRoundState, solution });
+      // For TribalWang rounds (even numbers), select a random number from available numbers
+      const isTribalWangRound = tribalWangEnabled && nextRoundNumber % 2 === 0;
+      if (isTribalWangRound) {
+        const availableNumbers = [
+          ...nextRoundState.numbers.small,
+          ...nextRoundState.numbers.medium,
+          ...nextRoundState.numbers.large
+        ];
+        if (availableNumbers.length > 0) {
+          const randomIndex = Math.floor(Math.random() * availableNumbers.length);
+          const tribalWangTarget = availableNumbers[randomIndex];
+          setTarget(tribalWangTarget);
+          setNextRoundState({ ...nextRoundState, target: tribalWangTarget });
+        }
+      } else {
+        // For round 3, generate target using only remaining unused numbers
+        const isThirdRound = nextRoundNumber === 3;
+        const { target, solution } = generateTarget(nextRoundState.numbers, isThirdRound);
+        setTarget(target);
+        if (solution) {
+          setNextRoundState({ ...nextRoundState, solution });
+        }
       }
       
       setDisplay('0');
@@ -438,6 +530,11 @@ const Calculator = () => {
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-gray-900 p-4">
+      {/* Show TribalWang celebration */}
+      {showingCelebration && (
+        <TribalWangCelebration onComplete={() => setShowingCelebration(false)} />
+      )}
+
       {showingSolution && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-800 text-white p-8 rounded-xl shadow-2xl transform scale-105 max-w-lg w-full">
@@ -463,7 +560,7 @@ const Calculator = () => {
           </div>
         </div>
       )}
-      {(isSuccess || gameComplete) && (
+      {((isSuccess && !showingCelebration) || gameComplete) && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className={`bg-green-500 text-white p-8 rounded-xl shadow-2xl transform ${gameComplete ? 'scale-110' : 'scale-105'}`}>
             {gameComplete ? (
@@ -574,26 +671,81 @@ const Calculator = () => {
               onReset={() => handleReset(false)}
               onGiveUp={handleGiveUp}
               showGiveUp={roundNumber === 3 && !isSuccess}
-            />
-
-            <AvailableResults
-              results={availableResults}
-              currentCalculationNumbers={currentCalculationNumbers}
+              tribalWangEnabled={tribalWangEnabled}
               roundNumber={roundNumber}
-              onResultClick={handleResultClick}
             />
 
-            <NumberGrid
-              gridNumbers={gridNumbers}
-              currentCalculationNumbers={currentCalculationNumbers}
-              availableResults={availableResults}
-              onNumberClick={handleNumberClick}
-            />
+            {/* Show remaining numbers for TribalWang guessing */}
+            {isTribalRound ? (
+              <div className="grid grid-cols-3 gap-4">
+                {/* Show available results as regular numbers during TribalWang rounds */}
+                {availableResults
+                  .filter(r => !r.used)
+                  .map((result, index) => (
+                    <div key={`result-${index}`} className="relative">
+                      <button
+                        onClick={() => handleNumberClick(result.value)}
+                        className={`${buttonBaseClass} h-12 text-lg ${
+                          wrongGuesses.includes(result.value)
+                            ? 'bg-red-500 cursor-not-allowed opacity-50'
+                            : 'bg-purple-600 hover:bg-purple-700'
+                        }`}
+                        disabled={wrongGuesses.includes(result.value)}
+                      >
+                        {result.value}
+                        {wrongGuesses.includes(result.value) && (
+                          <span className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-2xl">
+                            ❌
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                  ))}
+                {/* Show regular numbers */}
+                {gridNumbers
+                  .filter(n => !n.used)
+                  .map((number, index) => (
+                    <div key={index} className="relative">
+                      <button
+                        onClick={() => handleNumberClick(number.value)}
+                        className={`${buttonBaseClass} h-12 text-lg ${
+                          wrongGuesses.includes(number.value)
+                            ? 'bg-red-500 cursor-not-allowed opacity-50'
+                            : 'bg-purple-600 hover:bg-purple-700'
+                        }`}
+                        disabled={wrongGuesses.includes(number.value)}
+                      >
+                        {number.value}
+                        {wrongGuesses.includes(number.value) && (
+                          <span className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-2xl">
+                            ❌
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            ) : (
+              <>
+                <AvailableResults
+                  results={availableResults}
+                  currentCalculationNumbers={currentCalculationNumbers}
+                  roundNumber={roundNumber}
+                  onResultClick={handleResultClick}
+                />
+                <NumberGrid
+                  gridNumbers={gridNumbers}
+                  currentCalculationNumbers={currentCalculationNumbers}
+                  availableResults={availableResults}
+                  onNumberClick={handleNumberClick}
+                />
 
-            <Operators
-              onOperatorClick={handleOperatorClick}
-              onDelete={handleDelete}
-            />
+                <Operators
+                  onOperatorClick={handleOperatorClick}
+                  onDelete={handleDelete}
+                />
+              </>
+            )}
           </div>
         </div>
 
