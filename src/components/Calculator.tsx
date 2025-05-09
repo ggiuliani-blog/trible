@@ -5,7 +5,7 @@ import { CalculatorDisplay } from './CalculatorDisplay';
 import { NumberGrid } from './NumberGrid';
 import { AvailableResults } from './AvailableResults';
 import { Operators } from './Operators';
-import { TribalWangCelebration } from './TribalWangCelebration';
+import { TribalWangCelebration } from './TribalWangCelebration.tsx';
 
 interface Calculation {
   expression: string;
